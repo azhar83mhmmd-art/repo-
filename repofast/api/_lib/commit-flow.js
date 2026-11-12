@@ -1,7 +1,7 @@
 'use strict';
 // Shared tree → commit → ref pipeline used by bulk upload and rename.
 const v = require('./validate');
-const { toEntries } = require('../github/create-tree');
+const { toEntries } = require('./routes/github/create-tree');
 
 const enc = encodeURIComponent;
 
