@@ -1,0 +1,69 @@
+/* RepoFast design tokens */
+:root {
+  --bg: #090B10;
+  --sidebar: #0D1017;
+  --surface: #121722;
+  --elevated: #181F2B;
+  --elevated-2: #1E2635;
+  --primary: #7966F6;
+  --primary-hover: #8B7BFF;
+  --primary-soft: rgba(121, 102, 246, .14);
+  --primary-ring: rgba(121, 102, 246, .38);
+  --secondary: #5B8DEF;
+  --border: #252D3B;
+  --border-soft: #1B2230;
+  --text: #F1F3F8;
+  --text-2: #8B95A7;
+  --text-3: #5F6A7D;
+  --success: #35B982;
+  --warning: #E8AD54;
+  --danger: #EF6464;
+  --success-soft: rgba(53, 185, 130, .13);
+  --warning-soft: rgba(232, 173, 84, .13);
+  --danger-soft: rgba(239, 100, 100, .13);
+  --info-soft: rgba(91, 141, 239, .13);
+  --glass: rgba(18, 23, 34, .72);
+  --glow: radial-gradient(60% 50% at 80% 0%, rgba(121, 102, 246, .13), transparent 70%), radial-gradient(40% 40% at 0% 100%, rgba(91, 141, 239, .07), transparent 70%);
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, .35);
+  --shadow-md: 0 8px 24px rgba(0, 0, 0, .35);
+  --shadow-lg: 0 24px 64px rgba(0, 0, 0, .55);
+  --overlay: rgba(4, 6, 10, .66);
+  --code-bg: #0B0E14;
+
+  --radius-sm: 8px;
+  --radius: 12px;
+  --radius-lg: 16px;
+  --sidebar-w: 250px;
+  --sidebar-w-collapsed: 72px;
+  --topbar-h: 64px;
+
+  --font: 'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --mono: 'JetBrains Mono', ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace;
+  --ease: cubic-bezier(.2, .8, .2, 1);
+  color-scheme: dark;
+}
+
+:root[data-theme='light'] {
+  --bg: #F4F6FA;
+  --sidebar: #FFFFFF;
+  --surface: #FFFFFF;
+  --elevated: #F1F3F9;
+  --elevated-2: #E8ECF4;
+  --primary: #6B58EE;
+  --primary-hover: #5A47DE;
+  --primary-soft: rgba(107, 88, 238, .10);
+  --primary-ring: rgba(107, 88, 238, .35);
+  --border: #DDE2EC;
+  --border-soft: #E9EDF4;
+  --text: #121722;
+  --text-2: #5A6578;
+  --text-3: #8A94A6;
+  --glass: rgba(255, 255, 255, .78);
+  --glow: radial-gradient(60% 50% at 80% 0%, rgba(107, 88, 238, .09), transparent 70%);
+  --shadow-sm: 0 1px 2px rgba(18, 23, 34, .06);
+  --shadow-md: 0 8px 24px rgba(18, 23, 34, .10);
+  --shadow-lg: 0 24px 64px rgba(18, 23, 34, .18);
+  --overlay: rgba(18, 23, 34, .42);
+  --code-bg: #F7F8FC;
+  color-scheme: light;
+}
