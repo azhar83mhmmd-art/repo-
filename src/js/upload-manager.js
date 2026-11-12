@@ -1,9 +1,9 @@
 // Upload ZIP page: dropzone → ZIP preview/tree → configuration → live progress → success.
-import { html, mount, create, ic, $, $$, formatBytes, ext, debounce, copyText, safeUrl, shortSha } from './ui/dom.js';
+import { html, mount, create, ic, $, $$, formatBytes, ext, debounce, copyText, safeUrl, shortSha, esc } from './ui/dom.js';
 import { Select } from './ui/select.js';
 import { confirmDialog } from './ui/overlay.js';
 import { repoPicker } from './ui/repo-picker.js';
-import { readZip, buildTree, resolvePath, ZipError, LIMITS } from './zip-manager.js';
+import { readZip, readLocalFiles, itemsFromInput, itemsFromDrop, buildTree, resolvePath, ZipError, LIMITS } from './zip-manager.js';
 import { runUpload, UploadCancelled, MAX_DIRECT_BYTES } from './upload-engine.js';
 import { api, explain } from './github-client.js';
 import { notify } from './notification.js';
@@ -34,30 +34,52 @@ export async function render(host, ctx) {
   /* ---------------------------------------------------------------- landing */
   function drawLanding() {
     mount(host, html`
-      <div class="page-head"><div><h1>Upload your project</h1><p>Upload an entire project to GitHub in seconds. No need to upload files individually.</p></div></div>
-      <div class="dropzone" id="drop" tabindex="0" role="button" aria-label="Choose a ZIP file to upload">
+      <div class="page-head"><div><h1>Upload your project</h1><p>Push a ZIP, a whole folder or individual files to GitHub in a single commit. Every file is uploaded and tracked live.</p></div></div>
+      <div class="dropzone" id="drop">
         <div class="dz-icon">${ic('cloud-upload', 'xl')}</div>
-        <h2>Drag and Drop your ZIP file here</h2>
-        <p>Or <button type="button" class="link-btn" id="browse">browse files</button></p>
-        <div class="dz-meta"><span class="badge">${ic('archive', 'sm')}.ZIP</span><span class="badge">Max ${P.maxUploadMB} MB</span><span class="badge">Up to ${LIMITS.MAX_FILES.toLocaleString()} files</span></div>
-        <input type="file" id="file" accept=".zip,application/zip,application/x-zip-compressed" hidden>
+        <h2>Drop a ZIP, folder or files here</h2>
+        <p>or choose how you want to add your project</p>
+        <div class="src-actions">
+          <button type="button" class="btn primary lg" id="pickZip">${ic('archive')}<span>ZIP file</span></button>
+          <button type="button" class="btn lg" id="pickDir">${ic('folder-up')}<span>Folder</span></button>
+          <button type="button" class="btn lg" id="pickFiles">${ic('file-plus')}<span>Files</span></button>
+        </div>
+        <div class="dz-meta"><span class="badge">${ic('archive', 'sm')}.ZIP</span><span class="badge">${ic('folder', 'sm')}Folders</span><span class="badge">Max ${P.maxUploadMB} MB</span><span class="badge">Up to ${LIMITS.MAX_FILES.toLocaleString()} files</span></div>
+        <input type="file" id="inZip" accept=".zip,application/zip,application/x-zip-compressed" hidden>
+        <input type="file" id="inDir" webkitdirectory directory multiple hidden>
+        <input type="file" id="inFiles" multiple hidden>
       </div>
       <div class="dz-notes">
-        <div>${ic('shield-check')}<span>Processed in your browser. The ZIP is never stored on a server.</span></div>
+        <div>${ic('shield-check')}<span>Processed in your browser. Nothing is stored on a server.</span></div>
         <div>${ic('git-commit-horizontal')}<span>All files land in a single commit.</span></div>
         <div>${ic('folder')}<span>Your folder structure is preserved.</span></div>
       </div>`);
-    const drop = $('#drop', host); const input = $('#file', host);
-    const pick = () => input.click();
-    $('#browse', host).addEventListener('click', (e) => { e.stopPropagation(); pick(); });
-    drop.addEventListener('click', pick);
-    drop.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); pick(); } });
-    input.addEventListener('change', () => input.files[0] && load(input.files[0]));
+    const drop = $('#drop', host);
+    const bind = (btn, input) => { $(btn, host).addEventListener('click', () => input.click()); };
+    const inZip = $('#inZip', host); const inDir = $('#inDir', host); const inFiles = $('#inFiles', host);
+    bind('#pickZip', inZip); bind('#pickDir', inDir); bind('#pickFiles', inFiles);
+    inZip.addEventListener('change', () => inZip.files[0] && load(inZip.files[0]));
+    const fromInput = (input) => () => { if (!input.files.length) return; const { items, flat } = itemsFromInput(input.files); loadItems(items, flat && input === inDir); };
+    inDir.addEventListener('change', fromInput(inDir));
+    inFiles.addEventListener('change', fromInput(inFiles));
     let depth = 0;
     drop.addEventListener('dragenter', (e) => { e.preventDefault(); depth++; drop.classList.add('over'); });
     drop.addEventListener('dragover', (e) => e.preventDefault());
     drop.addEventListener('dragleave', () => { if (--depth <= 0) { depth = 0; drop.classList.remove('over'); } });
-    drop.addEventListener('drop', (e) => { e.preventDefault(); depth = 0; drop.classList.remove('over'); const f = e.dataTransfer.files[0]; if (f) load(f); });
+    drop.addEventListener('drop', async (e) => {
+      e.preventDefault(); depth = 0; drop.classList.remove('over');
+      const items = await itemsFromDrop(e.dataTransfer);
+      if (items.length === 1 && /\.zip$/i.test(items[0].file.name)) load(items[0].file); else if (items.length) loadItems(items, false);
+    });
+  }
+
+  function adopt(zip, label) {
+    S.zip = zip; S.removed = new Set(); S.selected = new Set(zip.files.map((f) => f.path)); S.expanded = new Set(); S.q = ''; S.rows = 300;
+    notify.success(label, `${zip.files.length.toLocaleString()} files, ${zip.folders.length.toLocaleString()} folders.`);
+    const sk = zip.skipped.system + zip.skipped.unsafe + zip.skipped.git;
+    if (sk) notify.warning('Some files will be skipped', `${zip.skipped.system} system/node_modules, ${zip.skipped.git} .git and ${zip.skipped.unsafe} unsafe entries were ignored.`);
+    if (zip.duplicates.length) notify.warning('Duplicate paths ignored', `${zip.duplicates.length} entries differ only by letter case.`);
+    drawWorkspace();
   }
 
   async function load(file) {
@@ -67,14 +89,22 @@ export async function render(host, ctx) {
     mount(host, html`<div class="page-head"><div><h1>Upload your project</h1></div></div><div class="card pad extracting"><div class="spinner-lg">${ic('loader-2', 'xl spin')}</div><div><h3>Extracting ${file.name}</h3><p class="cell-sub">Validating structure and checking for unsafe paths…</p></div></div>`);
     try {
       const zip = await readZip(file, { ignoreSystem: P.ignoreSystemFiles, maxBytes: LIMITS.MAX_TOTAL_UNCOMPRESSED });
-      S.zip = zip; S.removed = new Set(); S.selected = new Set(zip.files.map((f) => f.path)); S.expanded = new Set(); S.q = ''; S.rows = 300;
-      notify.success('ZIP extracted successfully', `${zip.files.length.toLocaleString()} files, ${zip.folders.length.toLocaleString()} folders.`);
-      const sk = zip.skipped.system + zip.skipped.unsafe + zip.skipped.git;
-      if (sk) notify.warning('Some files will be skipped', `${zip.skipped.system} system, ${zip.skipped.git} .git and ${zip.skipped.unsafe} unsafe entries were ignored.`);
-      if (zip.duplicates.length) notify.warning('Duplicate paths ignored', `${zip.duplicates.length} entries differ only by letter case.`);
-      drawWorkspace();
+      zip.kind = 'zip';
+      adopt(zip, 'ZIP extracted successfully');
     } catch (e) {
       notify.error(e instanceof ZipError ? 'Invalid ZIP file' : 'Could not read ZIP', e instanceof ZipError ? e.message : explain(e));
+      drawLanding();
+    }
+  }
+
+  async function loadItems(items, flat) {
+    mount(host, html`<div class="page-head"><div><h1>Upload your project</h1></div></div><div class="card pad extracting"><div class="spinner-lg">${ic('loader-2', 'xl spin')}</div><div><h3>Reading ${items.length.toLocaleString()} file${items.length === 1 ? '' : 's'}</h3><p class="cell-sub">Checking paths and sizes…</p></div></div>`);
+    try {
+      const m = readLocalFiles(items, { ignoreSystem: P.ignoreSystemFiles, maxBytes: P.maxUploadMB * 1024 * 1024 });
+      if (flat) notify.info('Folder structure not available', 'This browser did not report folder paths, so files are added without their subfolders. Use a ZIP to keep the full structure.');
+      adopt(m, m.kind === 'folder' ? 'Folder ready' : 'Files ready');
+    } catch (e) {
+      notify.error('Could not read selection', e instanceof ZipError ? e.message : explain(e));
       drawLanding();
     }
   }
@@ -99,11 +129,10 @@ export async function render(host, ctx) {
     mount(host, html`
       <div class="page-head"><div><h1>Upload your project</h1><p>Review the files, choose where they go, then push everything in one commit.</p></div></div>
       <section class="card zip-card">
-        <div class="zip-ic">${ic('archive', 'lg')}</div>
+        <div class="zip-ic">${ic(z.kind === 'folder' ? 'folder' : z.kind === 'files' ? 'files' : 'archive', 'lg')}</div>
         <div class="zip-main"><b class="zip-name">${z.name}</b>
-          <div class="zip-stats"><span>${formatBytes(z.size)}</span><span>${z.files.length.toLocaleString()} files</span><span>${z.folders.length.toLocaleString()} folders</span><span class="badge success">${ic('check-circle-2', 'sm')}Extracted</span>${z.rootFolder ? html`<span class="badge info mono">${ic('folder', 'sm')}${z.rootFolder}/</span>` : ''}</div></div>
-        <div class="zip-actions"><button class="btn sm" id="change">${ic('refresh-cw', 'sm')}Change ZIP</button><button class="btn sm ghost" id="removeZip">${ic('trash-2', 'sm')}Remove ZIP</button></div>
-        <input type="file" id="file2" accept=".zip,application/zip,application/x-zip-compressed" hidden>
+          <div class="zip-stats"><span>${formatBytes(z.size)}</span><span>${z.files.length.toLocaleString()} files</span><span>${z.folders.length.toLocaleString()} folders</span><span class="badge success">${ic('check-circle-2', 'sm')}${z.kind && z.kind !== 'zip' ? 'Ready' : 'Extracted'}</span>${z.rootFolder ? html`<span class="badge info mono">${ic('folder', 'sm')}${z.rootFolder}/</span>` : ''}</div></div>
+        <div class="zip-actions"><button class="btn sm" id="change">${ic('refresh-cw', 'sm')}Change</button><button class="btn sm ghost" id="removeZip">${ic('trash-2', 'sm')}Remove</button></div>
       </section>
       <div class="upload-grid">
         <section class="card tree-card">
@@ -115,8 +144,7 @@ export async function render(host, ctx) {
         <aside class="config" id="config"></aside>
       </div>`);
 
-    $('#change', host).addEventListener('click', () => $('#file2', host).click());
-    $('#file2', host).addEventListener('change', (e) => e.target.files[0] && load(e.target.files[0]));
+    $('#change', host).addEventListener('click', () => { teardown(); S.zip = null; drawLanding(); });
     $('#removeZip', host).addEventListener('click', () => { teardown(); S.zip = null; drawLanding(); });
     $('#selAll', host).addEventListener('click', () => { liveFiles().forEach((f) => S.selected.add(f.path)); drawTree(); drawConfigState(); });
     $('#selNone', host).addEventListener('click', () => { S.selected.clear(); drawTree(); drawConfigState(); });
@@ -369,12 +397,14 @@ export async function render(host, ctx) {
 
   async function execute({ repo, list, plan, branchName, baseBranch, author }) {
     S.running = true; S.abort = new AbortController();
+    initLog(list);
     drawProgress({ phase: 'validating', done: 0, totalOps: 1, filesDone: 0, totalFiles: list.length, bytesDone: 0, totalBytes: list.reduce((n, f) => n + f.size, 0), current: 'Starting…', percent: 0 }, repo, branchName);
     const started = Date.now();
     try {
       const res = await runUpload(list, {
         owner: repo.owner, repo: repo.name, branch: branchName, baseBranch, createBranch: S.createBranch, message: S.message.trim(), author, plan, signal: S.abort.signal,
         onProgress: (p) => updateProgress(p),
+        onFile: (ev) => trackFile(ev),
       });
       S.running = false; invalidateRepos();
       history.add({ zipName: S.zip.name, repo: repo.fullName, repoUrl: repo.htmlUrl, branch: branchName, files: res.files, folders: new Set(list.map((f) => f.path.split('/').slice(0, -1).join('/')).filter(Boolean)).size, commitSha: res.commitSha, commitUrl: res.commitUrl, message: S.message.trim(), status: 'success', bytes: list.reduce((n, f) => n + f.size, 0) });
@@ -389,6 +419,47 @@ export async function render(host, ctx) {
     }
   }
 
+  /* ---------------------------------------------------------------- per-file live log */
+  const L = { files: [], index: new Map(), raf: 0, last: 0, failed: null };
+  function initLog(list) {
+    L.files = list.map((f) => ({ path: f.path, size: f.size, status: 'queued' }));
+    L.index = new Map(L.files.map((f, i) => [f.path, i]));
+    L.failed = null;
+  }
+  function trackFile(ev) {
+    const i = L.index.get(ev.path); if (i === undefined) return;
+    L.files[i].status = ev.status;
+    if (ev.status === 'error') L.failed = { path: ev.path, error: ev.error };
+    scheduleLog();
+  }
+  function scheduleLog() {
+    if (L.raf) return;
+    const wait = Math.max(0, 120 - (performance.now() - L.last));
+    L.raf = setTimeout(() => { L.raf = 0; L.last = performance.now(); renderLog(); }, wait);
+  }
+  const FL_ICON = { queued: 'clock', reading: 'loader-2', uploading: 'loader-2', done: 'check-circle-2', error: 'alert-circle', cancelled: 'x' };
+  const FL_TEXT = { queued: 'Waiting', reading: 'Reading', uploading: 'Uploading', done: 'Uploaded', error: 'Failed', cancelled: 'Cancelled' };
+  function renderLog() {
+    const box = $('#flog', host); if (!box) return;
+    const f = L.files; const n = f.length;
+    const c = { queued: 0, active: 0, done: 0, error: 0 };
+    f.forEach((x) => { if (x.status === 'done') c.done++; else if (x.status === 'queued') c.queued++; else if (x.status === 'reading' || x.status === 'uploading') c.active++; else c.error++; });
+    const sum = $('#logSum', host);
+    if (sum) sum.textContent = `${c.done.toLocaleString()} uploaded · ${c.active} in progress · ${c.queued.toLocaleString()} waiting${c.error ? ` · ${c.error} failed` : ''}`;
+    let rows;
+    if (n <= 250) rows = f.map((x, i) => i);
+    else {
+      const picked = new Set(); let doneSeen = 0;
+      for (let i = n - 1; i >= 0 && doneSeen < 20; i--) if (f[i].status === 'done') { picked.add(i); doneSeen++; }
+      let q = 0; f.forEach((x, i) => { if (x.status === 'reading' || x.status === 'uploading' || x.status === 'error' || x.status === 'cancelled') picked.add(i); else if (x.status === 'queued' && q < 10) { picked.add(i); q++; } });
+      rows = [...picked].sort((a, b) => a - b);
+    }
+    box.innerHTML = rows.map((i) => { const x = f[i]; return `<div class="fl ${x.status}" data-i="${i}"><span class="fl-ic">${ic(FL_ICON[x.status], 'sm' + (x.status === 'reading' || x.status === 'uploading' ? ' spin' : ''))}</span><span class="fl-name mono" title="${esc(x.path)}">${esc(x.path)}</span><span class="fl-meta">${formatBytes(x.size)} · ${FL_TEXT[x.status]}</span></div>`; }).join('');
+    const act = box.querySelector('.fl.uploading, .fl.reading');
+    if (act && n <= 250) box.scrollTop = Math.max(0, act.offsetTop - box.clientHeight / 2);
+    else if (n > 250) box.scrollTop = 0;
+  }
+
   function drawProgress(p, repo, branch) {
     mount(host, html`
       <div class="page-head"><div><h1>Uploading to GitHub</h1><p>${repo.fullName} · <span class="mono">${branch}</span></p></div></div>
@@ -400,7 +471,12 @@ export async function render(host, ctx) {
           <div><span>Size processed</span><b id="pBytes">0 B</b></div><div><span>Total size</span><b id="pTotal">0 B</b></div>
         </div>
         <ol class="phases" id="phases">${PHASES.map(([k, l]) => html`<li data-k="${k}"><span class="ph-dot"></span>${l}</li>`)}</ol>
+      </section>
+      <section class="card file-log">
+        <div class="card-head"><div><h2>File progress</h2><p id="logSum">Waiting to start…</p></div></div>
+        <div class="flog" id="flog" role="log" aria-live="polite"></div>
       </section>`);
+    renderLog();
     $('#cancel', host).addEventListener('click', () => { S.abort && S.abort.abort(); });
     updateProgress(p);
   }
@@ -434,7 +510,7 @@ export async function render(host, ctx) {
           <div class="span2"><dt>Commit SHA</dt><dd><span class="sha">${res.commitSha}</span> <button class="btn ghost icon-only sm" id="cpSha" aria-label="Copy SHA">${ic('copy', 'sm')}</button></dd></div>
           <div class="span2"><dt>Commit URL</dt><dd><a class="mono" href="${safeUrl(res.commitUrl)}" target="_blank" rel="noopener noreferrer">${res.commitUrl}</a></dd></div>
         </dl>
-        <div class="success-actions"><a class="btn primary" href="${safeUrl(repo.htmlUrl)}" target="_blank" rel="noopener noreferrer">${ic('arrow-up-right', 'sm')}View Repository</a><a class="btn" href="${safeUrl(res.commitUrl)}" target="_blank" rel="noopener noreferrer">${ic('git-commit-horizontal', 'sm')}View Commit</a><button class="btn" id="again">${ic('cloud-upload', 'sm')}Upload Another ZIP</button></div>
+        <div class="success-actions"><a class="btn primary" href="${safeUrl(repo.htmlUrl)}" target="_blank" rel="noopener noreferrer">${ic('arrow-up-right', 'sm')}View Repository</a><a class="btn" href="${safeUrl(res.commitUrl)}" target="_blank" rel="noopener noreferrer">${ic('git-commit-horizontal', 'sm')}View Commit</a><button class="btn" id="again">${ic('cloud-upload', 'sm')}Upload Another</button></div>
       </section>`);
     $('#cpSha', host).addEventListener('click', () => copyText(res.commitSha).then(() => notify.success('SHA copied')));
     $('#again', host).addEventListener('click', () => { teardown(); S.zip = null; drawLanding(); });
@@ -448,6 +524,7 @@ export async function render(host, ctx) {
         <h1>${cancelled ? 'Upload cancelled' : 'Upload failed'}</h1>
         <p class="cell-sub" style="max-width:56ch">${cancelled ? 'Nothing was committed. Your repository is unchanged.' : explain(e)}</p>
         ${!cancelled && conflict ? html`<div class="alert warning" style="max-width:520px;text-align:left">${ic('alert-triangle')}<div><b>Branch has changed</b><br>Someone pushed while you were uploading. Retry to build on the latest commit.</div></div>` : ''}
+        ${!cancelled && L.failed ? html`<p class="cell-sub mono" style="max-width:56ch;overflow-wrap:anywhere">Failed on: ${L.failed.path}</p>` : ''}
         ${!cancelled ? html`<p class="cell-sub">No partial commit was created — GitHub only changes the branch in the final step.</p>` : ''}
         <div class="success-actions"><button class="btn primary" id="retry">${ic('refresh-cw', 'sm')}Try again</button><button class="btn" id="back">${ic('arrow-left', 'sm')}Back to settings</button></div>
       </section>`);

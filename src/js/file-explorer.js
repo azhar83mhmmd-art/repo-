@@ -42,10 +42,12 @@ export async function render(host, ctx) {
             <button class="btn sm" id="newFolder">${ic('folder-plus', 'sm')}<span>New folder</span></button>
             <button class="btn sm" id="newFile">${ic('file-plus', 'sm')}<span>New file</span></button>
             <button class="btn sm" id="upFile">${ic('upload', 'sm')}<span>Upload files</span></button>
+            <button class="btn sm" id="upDir">${ic('folder-up', 'sm')}<span>Upload folder</span></button>
             <button class="btn sm" id="upZip">${ic('archive', 'sm')}<span>Upload ZIP</span></button>
             <button class="btn sm icon-only" id="refresh" aria-label="Refresh" title="Refresh">${ic('refresh-cw', 'sm')}</button>
             <button class="btn sm icon-only" id="openGh" aria-label="Open on GitHub" title="Open on GitHub">${ic('arrow-up-right', 'sm')}</button>
             <input type="file" id="fileIn" multiple hidden>
+            <input type="file" id="dirIn" webkitdirectory directory multiple hidden>
           </div>
         </div>
         <div class="ex-filter"><div class="input-wrap grow">${ic('search')}<input class="input" id="filter" type="search" placeholder="Filter this folder…" aria-label="Filter files"></div><div id="sortSlot" class="tb-select"></div></div>
@@ -69,7 +71,7 @@ export async function render(host, ctx) {
     },
   });
 
-  const toggleWrite = () => ['newFolder', 'newFile', 'upFile'].forEach((id) => { const b = $('#' + id, host); b.disabled = !S.writable || S.empty && id === 'newFile' && false; b.title = S.writable ? '' : 'Your token cannot write to this repository'; });
+  const toggleWrite = () => ['newFolder', 'newFile', 'upFile', 'upDir'].forEach((id) => { const b = $('#' + id, host); b.disabled = !S.writable || S.empty && id === 'newFile' && false; b.title = S.writable ? '' : 'Your token cannot write to this repository'; });
   const ghUrl = () => `${S.repo.htmlUrl}/tree/${encodeURIComponent(S.branch)}${S.path ? '/' + S.path.split('/').map(encodeURIComponent).join('/') : ''}`;
   const sync = () => history_replace();
   function history_replace() { const p = new URLSearchParams({ repo: S.repo.fullName, branch: S.branch, ...(S.path ? { path: S.path } : {}) }); try { window.history.replaceState(null, '', `#/explorer?${p}`); } catch { /* ignore */ } }
@@ -137,7 +139,8 @@ export async function render(host, ctx) {
   function rowMenu(anchor, e) {
     const w = S.writable;
     const items = e.type === 'dir'
-      ? [{ label: 'Open', icon: 'folder-open', onClick: () => open(e.path) }, { label: 'Upload ZIP here', icon: 'archive', onClick: () => goZip(e.path) }, { label: 'Open on GitHub', icon: 'arrow-up-right', href: safeUrl(e.htmlUrl) }]
+      ? [{ label: 'Open', icon: 'folder-open', onClick: () => open(e.path) }, { label: 'Upload ZIP / folder here', icon: 'archive', onClick: () => goZip(e.path) }, { label: 'Open on GitHub', icon: 'arrow-up-right', href: safeUrl(e.htmlUrl) },
+         ...(w ? ['sep', { label: 'Delete folder', icon: 'trash-2', danger: true, onClick: () => removeFolder(e) }] : [])]
       : [{ label: 'Preview', icon: 'eye', onClick: () => openFile(e) },
          ...(w && isText(e.name) ? [{ label: 'Edit', icon: 'pencil', onClick: () => openFile(e, true) }] : []),
          { label: 'Download', icon: 'download', onClick: () => download(e) },
@@ -297,12 +300,28 @@ export async function render(host, ctx) {
   }
 
   async function remove(e) {
-    if (!(await confirmDialog({ title: `Delete ${e.name}?`, message: 'This creates a commit that removes the file. You can restore it from the commit history.', confirmText: 'Delete file', danger: true }))) return;
+    if (!(await confirmDialog({ title: `Delete ${e.name}?`, message: 'This creates a commit that removes the file. You can restore it from the commit history.', confirmText: 'Delete file', danger: true, details: html`<span class="mono">${e.path}</span>` }))) return;
+    const m = modal({ title: 'Deleting file', body: html`<div class="del-progress"><span class="spin-wrap">${ic('loader-2', 'lg spin')}</span><div><b>${e.path}</b><p class="cell-sub">Creating a commit…</p></div></div>`, dismissable: false });
     try {
-      const res = await api.deleteFile({ owner: S.repo.owner, repo: S.repo.name, path: e.path, sha: e.sha, branch: S.branch });
+      const res = await api.deletePath({ owner: S.repo.owner, repo: S.repo.name, path: e.path, branch: S.branch });
+      m.close();
       notify.success('File deleted', e.path, { href: res.commit.htmlUrl, linkText: 'View commit' });
-      S.cache.clear(); await open(S.path, true);
-    } catch (er) { notify.error('Delete failed', explain(er)); }
+      S.cache.clear(); S.dates.clear(); await open(S.path, true);
+    } catch (er) { m.close(); notify.error('Delete failed', explain(er)); }
+  }
+
+  async function removeFolder(e) {
+    const ok = await confirmDialog({ title: `Delete folder “${e.name}”?`, message: 'Every file inside this folder (including subfolders) will be removed in a single commit. You can restore them from the commit history.', confirmText: 'Delete folder', danger: true, details: html`<span class="mono">${e.path}/</span>` });
+    if (!ok) return;
+    const m = modal({ title: 'Deleting folder', body: html`<div class="del-progress"><span class="spin-wrap">${ic('loader-2', 'lg spin')}</span><div><b>${e.path}/</b><p class="cell-sub">Creating one commit that removes every file…</p></div></div>`, dismissable: false });
+    try {
+      const res = await api.deletePath({ owner: S.repo.owner, repo: S.repo.name, branch: S.branch, path: e.path });
+      m.close();
+      notify.success('Folder deleted', `${res.deleted} file(s) removed from ${e.path}`, { href: res.commit.htmlUrl, linkText: 'View commit' });
+      S.cache.clear(); S.dates.clear(); S.expanded.delete(e.path);
+      if (S.path === e.path || S.path.startsWith(e.path + '/')) S.path = e.path.split('/').slice(0, -1).join('/');
+      await open(S.path, true);
+    } catch (er) { m.close(); notify.error('Could not delete folder', explain(er)); }
   }
 
   async function newFolder() {
@@ -329,7 +348,7 @@ export async function render(host, ctx) {
 
   /** Uploads several local files in ONE commit via the same engine used for ZIPs. */
   async function uploadFiles(files) {
-    const list = [...files].map((f) => ({ path: joinPath(S.path, f.name), size: f.size, entry: { async: async () => new Uint8Array(await f.arrayBuffer()) } }));
+    const list = [...files].filter((f) => !/(^|\/)(\.git|node_modules|__MACOSX)(\/|$)|(^|\/)(\.DS_Store|Thumbs\.db)$/i.test(f.webkitRelativePath || f.name)).map((f) => ({ path: joinPath(S.path, f.webkitRelativePath || f.name), size: f.size, entry: { async: async () => new Uint8Array(await f.arrayBuffer()) } }));
     if (!list.length) return;
     const msg = list.length === 1 ? `Add ${list[0].path} via RepoFast` : `Add ${list.length} files via RepoFast`;
     let plan;
@@ -337,9 +356,18 @@ export async function render(host, ctx) {
     catch (er) { if (S.empty) plan = { empty: true, existing: [], head: null, baseTree: null }; else { notify.error('Could not check the repository', explain(er)); return; } }
     if (plan.existing.length && !(await confirmDialog({ title: `Replace ${plan.existing.length} existing file(s)?`, message: 'Files with the same name in this folder will be overwritten.', confirmText: 'Replace and upload' }))) return;
     const ctl = new AbortController();
-    const m = modal({ title: 'Uploading files', body: html`<div class="progress lg"><i id="upb"></i></div><p class="cell-sub mono" id="upc">Starting…</p>`, dismissable: false });
+    const m = modal({ title: 'Uploading files', body: html`<div class="progress lg"><i id="upb"></i></div><p class="cell-sub mono" id="upc">Starting…</p><div class="flog mini" id="upl"></div>`, dismissable: false });
+    const recent = [];
+    const onFile = (ev) => {
+      if (ev.status === 'reading') return;
+      const i = recent.findIndex((r) => r.path === ev.path); if (i >= 0) recent.splice(i, 1);
+      recent.push(ev); if (recent.length > 8) recent.shift();
+      const box = $('#upl', m.el); if (!box) return;
+      const T = { uploading: ['loader-2', 'Uploading'], done: ['check-circle-2', 'Uploaded'], error: ['alert-circle', 'Failed'], cancelled: ['x', 'Cancelled'] };
+      box.innerHTML = recent.map((r) => `<div class="fl ${r.status}"><span class="fl-ic">${ic(T[r.status][0], 'sm' + (r.status === 'uploading' ? ' spin' : ''))}</span><span class="fl-name mono">${esc(r.path)}</span><span class="fl-meta">${T[r.status][1]}</span></div>`).join('');
+    };
     try {
-      const res = await runUpload(list, { owner: S.repo.owner, repo: S.repo.name, branch: S.branch, message: msg, plan, signal: ctl.signal, onProgress: (p) => { const b = $('#upb', m.el); if (b) b.style.width = `${p.percent}%`; const c = $('#upc', m.el); if (c) c.textContent = `${p.percent}% · ${p.current}`; } });
+      const res = await runUpload(list, { owner: S.repo.owner, repo: S.repo.name, branch: S.branch, message: msg, plan, signal: ctl.signal, onFile, onProgress: (p) => { const b = $('#upb', m.el); if (b) b.style.width = `${p.percent}%`; const c = $('#upc', m.el); if (c) c.textContent = `${p.percent}% · ${p.current}`; } });
       m.close(); S.cache.clear(); S.empty = false;
       history.add({ zipName: list.length === 1 ? list[0].path.split('/').pop() : `${list.length} files`, repo: S.repo.fullName, repoUrl: S.repo.htmlUrl, branch: S.branch, files: list.length, commitSha: res.commitSha, commitUrl: res.commitUrl, message: msg, status: 'success', bytes: list.reduce((n, f) => n + f.size, 0) });
       notify.success('Files uploaded successfully', `${list.length} file(s) in one commit.`, { href: res.commitUrl, linkText: 'View commit' });
@@ -354,6 +382,8 @@ export async function render(host, ctx) {
   $('#newFile', host).addEventListener('click', newFile);
   $('#upFile', host).addEventListener('click', () => $('#fileIn', host).click());
   $('#fileIn', host).addEventListener('change', (e) => { const f = e.target.files; if (f.length) uploadFiles(f).finally(() => { e.target.value = ''; }); });
+  $('#upDir', host).addEventListener('click', () => $('#dirIn', host).click());
+  $('#dirIn', host).addEventListener('change', (e) => { const f = e.target.files; if (f.length) uploadFiles(f).finally(() => { e.target.value = ''; }); });
   $('#upZip', host).addEventListener('click', () => goZip());
   $('#refresh', host).addEventListener('click', async (e) => { const b = e.currentTarget; b.classList.add('loading'); S.cache.clear(); S.dates.clear(); await picker.refreshBranches(); await open(S.path, true); b.classList.remove('loading'); });
   $('#openGh', host).addEventListener('click', () => window.open(ghUrl(), '_blank', 'noopener'));

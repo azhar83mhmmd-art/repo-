@@ -5,9 +5,10 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const { URL } = require('url');
+const { dispatch } = require('./api/_lib/router');
 
 const ROOT = __dirname;
-const PORT = Number(process.env.PORT) || 8323;
+const PORT = Number(process.env.PORT) || 3000;
 const MIME = {
   '.html': 'text/html; charset=utf-8', '.css': 'text/css; charset=utf-8', '.js': 'text/javascript; charset=utf-8',
   '.mjs': 'text/javascript; charset=utf-8', '.json': 'application/json', '.svg': 'image/svg+xml',
@@ -41,9 +42,6 @@ function createServer() {
     const url = new URL(req.url, `http://${req.headers.host}`);
 
     if (url.pathname.startsWith('/api/')) {
-      const file = path.join(ROOT, url.pathname.replace(/\/+$/, '') + '.js');
-      const safe = path.resolve(file).startsWith(path.join(ROOT, 'api') + path.sep) && !path.basename(file).startsWith('_') && !file.includes(`${path.sep}_lib${path.sep}`);
-      if (!safe || !fs.existsSync(file)) { res.writeHead(404, { 'Content-Type': 'application/json' }); return res.end('{"error":{"status":404,"message":"Not found"}}'); }
       try {
         req.query = Object.fromEntries(url.searchParams);
         if (req.method !== 'GET' && req.method !== 'HEAD') {
@@ -52,7 +50,7 @@ function createServer() {
         }
         res.status = (code) => { res.statusCode = code; return res; };
         res.json = (obj) => { res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify(obj)); };
-        return await require(file)(req, res);
+        return await dispatch(req, res);
       } catch (e) {
         res.writeHead(e.status || 500, { 'Content-Type': 'application/json' });
         return res.end(JSON.stringify({ error: { status: e.status || 500, message: e.status === 413 ? 'Upload exceeds the configured request size limit.' : 'An unexpected server error occurred.' } }));

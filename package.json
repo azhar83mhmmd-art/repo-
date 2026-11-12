@@ -4,7 +4,7 @@
   "description": "RepoFast — GitHub repository manager. Upload a ZIP once, push the whole project to GitHub in a single commit.",
   "private": true,
   "type": "commonjs",
-  "engines": { "node": "24.x" },
+  "engines": { "node": ">=18" },
   "scripts": {
     "dev": "node dev-server.js",
     "dev:vercel": "vercel dev",

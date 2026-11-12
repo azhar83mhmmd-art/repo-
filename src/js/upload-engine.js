@@ -4,8 +4,7 @@ import { api, ApiError, PROXY_MAX_B64 } from './github-client.js';
 import { readEntry, toBase64 } from './zip-manager.js';
 
 export const MAX_DIRECT_BYTES = 50 * 1024 * 1024; // GitHub recommends staying below 50 MB per file
-const BATCH_FILES = 40;
-const CONCURRENCY = 2;
+const CONCURRENCY = 3; // files in flight at once; each file is its own request so progress is reported per file
 const TREE_CHUNK = 1000;
 
 export class UploadCancelled extends Error { constructor() { super('Upload cancelled.'); this.name = 'UploadCancelled'; } }
@@ -18,9 +17,9 @@ async function retry(fn, signal, tries = 3) {
     catch (e) {
       if (e && e.name === 'AbortError') throw new UploadCancelled();
       last = e;
-      const transient = e instanceof ApiError && [0, 502, 503, 504].includes(e.status);
+      const transient = e instanceof ApiError && ([0, 502, 503, 504].includes(e.status) || e.code === 'app_rate_limited');
       if (!transient || i === tries) throw e;
-      await new Promise((r) => setTimeout(r, 600 * 2 ** (i - 1)));
+      await new Promise((r) => setTimeout(r, (e.code === 'app_rate_limited' ? 4000 : 600) * 2 ** (i - 1)));
     }
   }
   throw last;
@@ -42,11 +41,13 @@ export function planBatches(files) {
 
 /**
  * files: [{ path (final repo path), size, entry (JSZip entry wrapper from zip-manager) }]
- * opts: { owner, repo, branch, baseBranch, createBranch, message, author, plan, signal, onProgress }
+ * opts: { owner, repo, branch, baseBranch, createBranch, message, author, plan, signal, onProgress, onFile }
+ * onFile({ path, size, status: 'reading'|'uploading'|'done'|'error'|'cancelled', error? }) fires for every file as it happens.
  * plan: result of api.checkConflicts for the branch we build on ({ empty, head, baseTree }).
  */
 export async function runUpload(files, opts) {
-  const { owner, repo, branch, createBranch, message, author, signal, onProgress } = opts;
+  const { owner, repo, branch, createBranch, message, author, signal, onProgress, onFile } = opts;
+  const fileEvt = (f, status, error) => { try { onFile && onFile({ path: f.path, size: f.size, status, error }); } catch { /* UI errors must not break the upload */ } };
   let { plan } = opts;
   const totalBytes = files.reduce((n, f) => n + f.size, 0);
   const treeChunks = Math.ceil(files.length / TREE_CHUNK);
@@ -67,8 +68,11 @@ export async function runUpload(files, opts) {
     check();
     const first = files[0];
     emit({ phase: 'blobs', current: `Initialising empty repository with ${first.path}` });
+    fileEvt(first, 'uploading');
     const bytes = await readEntry(first);
-    await retry(() => api.updateFile({ owner, repo, path: first.path, content: toBase64(bytes), message, branch }), signal);
+    try { await retry(() => api.updateFile({ owner, repo, path: first.path, content: toBase64(bytes), message, branch }), signal); }
+    catch (e) { fileEvt(first, e instanceof UploadCancelled ? 'cancelled' : 'error', e); throw e; }
+    fileEvt(first, 'done');
     st.commitsCreated = 2; st.done += 1; st.filesDone += 1; st.bytesDone += first.size;
     emit();
     queue = files.slice(1);
@@ -79,43 +83,43 @@ export async function runUpload(files, opts) {
     }
   }
 
-  // 2) Blobs
-  const { batches, direct } = planBatches(queue);
+  // 2) Blobs — one request per file so every file reports its own status in real time
   const blobs = new Map();
-  emit({ phase: 'blobs', current: 'Reading files from the ZIP' });
+  emit({ phase: 'blobs', current: 'Uploading files' });
 
-  const runBatch = async (batch) => {
+  const runFile = async (f) => {
     check();
-    const payload = [];
-    for (const f of batch) {
-      check();
-      emit({ current: `Extracting ${f.path}` });
-      const b64 = toBase64(await readEntry(f));
-      payload.push({ path: f.path, content: b64 });
+    if (f.size > MAX_DIRECT_BYTES) {
+      const err = new ApiError(413, `"${f.path}" is larger than 50 MB. Use Git LFS for files this large.`, { code: 'file_too_large' });
+      fileEvt(f, 'error', err); throw err;
     }
-    emit({ current: batch.length === 1 ? batch[0].path : `Uploading ${batch.length} files` });
-    const res = await retry(() => api.blobs(owner, repo, payload, signal), signal);
-    for (const b of res.blobs) blobs.set(b.path, b.sha);
-    const bytes = batch.reduce((n, f) => n + f.size, 0);
-    emit({ done: st.done + batch.length, filesDone: st.filesDone + batch.length, bytesDone: st.bytesDone + bytes, current: batch[batch.length - 1].path });
-  };
-
-  const runDirect = async (f) => {
-    check();
-    if (f.size > MAX_DIRECT_BYTES) throw new ApiError(413, `"${f.path}" is larger than 50 MB. Use Git LFS for files this large.`, { code: 'file_too_large' });
-    emit({ current: `Uploading large file ${f.path}` });
-    const b64 = toBase64(await readEntry(f));
-    const sha = await retry(() => api.blobDirect(owner, repo, b64, signal), signal);
-    blobs.set(f.path, sha);
+    fileEvt(f, 'reading');
+    emit({ current: f.path });
+    try {
+      const b64 = toBase64(await readEntry(f));
+      check();
+      fileEvt(f, 'uploading');
+      let sha;
+      if (Math.ceil(f.size * 4 / 3) + 8 > PROXY_MAX_B64 * 0.95) {
+        sha = await retry(() => api.blobDirect(owner, repo, b64, signal), signal);
+      } else {
+        const res = await retry(() => api.blobs(owner, repo, [{ path: f.path, content: b64 }], signal), signal);
+        sha = res.blobs[0].sha;
+      }
+      blobs.set(f.path, sha);
+    } catch (e) {
+      fileEvt(f, e instanceof UploadCancelled || (e && e.name === 'AbortError') ? 'cancelled' : 'error', e);
+      throw e;
+    }
+    fileEvt(f, 'done');
     emit({ done: st.done + 1, filesDone: st.filesDone + 1, bytesDone: st.bytesDone + f.size, current: f.path });
   };
 
-  const jobs = [...batches.map((b) => () => runBatch(b)), ...direct.map((f) => () => runDirect(f))];
   let next = 0; let failure = null;
-  await Promise.all(Array.from({ length: Math.min(CONCURRENCY, jobs.length) }, async () => {
+  await Promise.all(Array.from({ length: Math.min(CONCURRENCY, queue.length) }, async () => {
     while (!failure) {
-      const i = next++; if (i >= jobs.length) return;
-      try { await jobs[i](); } catch (e) { failure = failure || e; }
+      const i = next++; if (i >= queue.length) return;
+      try { await runFile(queue[i]); } catch (e) { failure = failure || e; }
     }
   }));
   if (failure) throw failure;

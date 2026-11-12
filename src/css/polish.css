@@ -74,3 +74,105 @@ body::before {
   .content { padding-bottom: calc(104px + env(safe-area-inset-bottom)); }
   .toasts { bottom: calc(96px + env(safe-area-inset-bottom)); }
 }
+
+/* ======================================================================
+   Upload sources, live file log, explorer & settings layout
+   ====================================================================== */
+.src-actions { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; margin: 14px 0 6px; }
+.src-actions .btn { min-width: 132px; }
+.dropzone { padding: 52px 24px 40px; }
+.dropzone h2 { letter-spacing: -.02em; }
+
+.file-log { margin-top: 18px; overflow: hidden; }
+.flog { max-height: 380px; overflow-y: auto; overscroll-behavior: contain; padding: 6px; }
+.flog.mini { max-height: 200px; border: 1px solid var(--border-soft); border-radius: 12px; background: var(--elevated); padding: 4px; min-height: 40px; }
+.fl { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 9px; font-size: 12.5px; transition: background .15s; }
+.fl + .fl { margin-top: 1px; }
+.fl-ic { display: grid; place-items: center; color: var(--text-3); }
+.fl-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); font-size: 12.5px; }
+.fl-meta { color: var(--text-3); font-size: 11.5px; white-space: nowrap; }
+.fl.uploading, .fl.reading { background: var(--primary-soft); }
+.fl.uploading .fl-ic, .fl.reading .fl-ic { color: var(--primary-hover); }
+.fl.done .fl-ic, .fl.done .fl-meta { color: var(--success); }
+.fl.error { background: var(--danger-soft); } .fl.error .fl-ic, .fl.error .fl-meta { color: var(--danger); }
+.fl.cancelled .fl-ic, .fl.cancelled .fl-meta { color: var(--warning); }
+.fl.queued .fl-name { color: var(--text-2); }
+.del-progress { display: flex; gap: 14px; align-items: center; }
+.del-progress .spin-wrap { color: var(--primary-hover); }
+.del-progress b { overflow-wrap: anywhere; }
+
+/* Explorer toolbar */
+.ex-bar { gap: 12px; }
+.ex-actions .btn { white-space: nowrap; }
+.table.files tbody tr { transition: background .12s; }
+.table.files tbody tr:hover { background: var(--primary-soft); }
+.table.files .tr-ic { width: 32px; height: 32px; border-radius: 9px; background: var(--elevated); place-items: center; }
+.table.files .tr-ic.dir { background: var(--info-soft); }
+
+/* Settings → Application */
+.card-body .kv { border-top: 0; }
+.card-body .kv > div:first-child { border-top: 0; padding-top: 0; }
+
+@media (max-width: 760px) {
+  .page-head { margin-bottom: 16px; }
+  .page-head h1 { font-size: 22px; }
+  .page-head p { font-size: 13px; }
+
+  /* Upload landing */
+  .dropzone { padding: 30px 16px 26px; border-radius: 20px; }
+  .dropzone h2 { font-size: 18px; }
+  .src-actions { display: grid; grid-template-columns: 1fr; width: 100%; }
+  .src-actions .btn { width: 100%; min-width: 0; }
+  .fl { grid-template-columns: 20px minmax(0, 1fr); row-gap: 0; }
+  .fl-meta { grid-column: 2; margin-top: -2px; }
+  .flog { max-height: 320px; }
+
+  /* Explorer: tidy file-manager list instead of stacked label cards */
+  .ex-bar { padding: 12px; flex-direction: column; align-items: stretch; }
+  .ex-actions { display: flex; flex-wrap: nowrap; overflow-x: auto; gap: 8px; margin: 0 -12px; padding: 2px 12px 4px; scrollbar-width: none; -webkit-overflow-scrolling: touch; }
+  .ex-actions::-webkit-scrollbar { display: none; }
+  .ex-actions .btn span { display: inline; }
+  .ex-actions .btn { width: auto; padding: 0 12px; flex: none; }
+  .ex-actions .btn.icon-only { width: 32px; padding: 0; }
+  .ex-filter { padding: 10px 12px; flex-direction: column; }
+  .ex-filter .tb-select { width: 100%; }
+
+  .table.files, .table.files tbody { display: block; }
+  .table.files tr[data-path], .table.files tr.up { display: grid; grid-template-columns: auto auto minmax(0, 1fr) 40px; grid-template-areas: "name name name act" "size date . act"; align-items: center; column-gap: 8px; row-gap: 0; padding: 10px 12px; }
+  .table.files tr.up { grid-template-columns: 1fr; grid-template-areas: "name"; }
+  .table.files tr.up td { grid-area: name; }
+  .table.files tr[data-path] td { padding: 0; border: 0; display: block; text-align: left; width: auto; position: static; }
+  .table.files tr[data-path] td::before { display: none !important; }
+  .table.files td[data-label=Name] { grid-area: name; padding-bottom: 2px; justify-content: flex-start; }
+  .table.files td[data-label=Type] { display: none; }
+  .table.files td[data-label=Size] { grid-area: size; padding-left: 44px; }
+  .table.files td[data-label=Updated] { grid-area: date; }
+  .table.files td[data-label=Updated]::after { content: ''; }
+  .table.files td.num:last-child { grid-area: act; justify-self: end; position: static !important; }
+  .table.files td[data-label=Size] .cell-sub::after { content: ' ·'; }
+  .table.files .cell-sub { font-size: 12px; }
+  .table.files .fname { font-size: 14px; font-weight: 600; }
+
+  /* Settings: tidy action buttons */
+  .card-body > .row-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; justify-content: stretch; }
+  .card-body > .row-actions .btn { width: 100%; justify-content: center; }
+  .set-row { gap: 10px; }
+  .kv > div { padding: 12px 0; }
+}
+
+/* ======================================================================
+   Responsive safety: nothing may be wider than the screen
+   ====================================================================== */
+html, body { max-width: 100%; overflow-x: clip; }
+.app, .main, .content, .card, .explorer, .ex-main, .ex-bar, .upload-grid > *, .two-col > *, .connect-grid > *, .repo-grid > *, .stats > * { min-width: 0; }
+.explorer { grid-template-columns: 250px minmax(0, 1fr); }
+.ex-actions { min-width: 0; max-width: 100%; }
+.path-crumbs { min-width: 0; max-width: 100%; overflow-x: auto; flex-wrap: nowrap; scrollbar-width: none; }
+.path-crumbs button { white-space: nowrap; }
+.table-wrap { max-width: 100%; }
+@media (max-width: 1024px) { .explorer { grid-template-columns: minmax(0, 1fr); } }
+@media (max-width: 760px) {
+  .ex-actions { margin: 0; padding: 2px 0 4px; }
+  .modal-root { z-index: 120; }
+  .menu { max-width: calc(100vw - 16px); z-index: 160; }
+}

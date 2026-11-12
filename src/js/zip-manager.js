@@ -137,3 +137,68 @@ export function resolvePath(zipPath, { structure, rootFolder, destination }) {
   const dest = (destination || '').replace(/^\/+|\/+$/g, '');
   return dest ? `${dest}/${p}` : p;
 }
+
+/* ------------------------------------------------------------------ local folders / loose files */
+
+const JUNK_DIR_RE = /(^|\/)node_modules(\/|$)/;
+
+/**
+ * Builds the same manifest shape as readZip() from files picked from disk.
+ * items: [{ file: File, path: 'folder/sub/a.txt' }]  (path is relative; a bare name for loose files)
+ * Nothing is read into memory until upload time — each File is read lazily, one at a time.
+ */
+export function readLocalFiles(items, { ignoreSystem = true, maxBytes, name } = {}) {
+  const limit = maxBytes || LIMITS.MAX_TOTAL_UNCOMPRESSED;
+  const skipped = { system: 0, unsafe: 0, git: 0 };
+  const entries = [];
+  for (const { file, path } of items) {
+    const clean = sanitizeEntryPath(path);
+    if (!clean) { if (/(^|[\\/])\.git([\\/]|$)/i.test(path)) skipped.git++; else skipped.unsafe++; continue; }
+    if (ignoreSystem && (SYSTEM_RE.test(clean) || JUNK_DIR_RE.test(clean))) { skipped.system++; continue; }
+    if (file.size > LIMITS.MAX_FILE_BYTES) throw new ZipError(`"${clean}" is ${Math.round(file.size / 1048576)} MB. GitHub rejects files over ${LIMITS.MAX_FILE_BYTES / 1048576} MB.`);
+    entries.push({ path: clean, size: file.size, csize: 0, entry: { async: async () => new Uint8Array(await file.arrayBuffer()) } });
+  }
+  if (!entries.length) throw new ZipError('No uploadable files were found in that selection.');
+  if (entries.length > LIMITS.MAX_FILES) throw new ZipError(`That selection has ${entries.length.toLocaleString()} files. The limit is ${LIMITS.MAX_FILES.toLocaleString()} files per upload.`);
+  const total = entries.reduce((n, e) => n + e.size, 0);
+  if (total > limit) throw new ZipError(`The total size (${Math.round(total / 1048576)} MB) is over the ${Math.round(limit / 1048576)} MB limit.`);
+
+  const seen = new Set(); const duplicates = []; const unique = [];
+  for (const e of entries) { const k = e.path.toLowerCase(); if (seen.has(k)) { duplicates.push(e.path); continue; } seen.add(k); unique.push(e); }
+  const folders = new Set();
+  for (const e of unique) { const parts = e.path.split('/'); for (let i = 1; i < parts.length; i++) folders.add(parts.slice(0, i).join('/')); }
+  const roots = new Set(unique.map((e) => e.path.split('/')[0]));
+  const allNested = unique.every((e) => e.path.includes('/'));
+  const rootFolder = allNested && roots.size === 1 ? [...roots][0] : null;
+  unique.sort((a, b) => a.path.localeCompare(b.path));
+  return {
+    kind: rootFolder || folders.size ? 'folder' : 'files',
+    name: name || rootFolder || (unique.length === 1 ? unique[0].path : `${unique.length} files`),
+    size: total, files: unique, folders: [...folders].sort(), totalBytes: total, rootFolder, skipped, duplicates, zip: null,
+  };
+}
+
+/** Items from <input webkitdirectory> / multi-file inputs. Falls back to bare names when the browser gives no folder paths. */
+export function itemsFromInput(fileList) {
+  const files = [...fileList];
+  const hasRel = files.some((f) => f.webkitRelativePath);
+  return { items: files.map((file) => ({ file, path: file.webkitRelativePath || file.name })), flat: !hasRel };
+}
+
+/** Walks a drag-and-drop DataTransfer, descending into dropped folders. */
+export async function itemsFromDrop(dt) {
+  const out = [];
+  const entries = [...(dt.items || [])].map((i) => (i.webkitGetAsEntry ? i.webkitGetAsEntry() : null)).filter(Boolean);
+  if (!entries.length) return [...dt.files].map((file) => ({ file, path: file.name }));
+  const readAll = (reader) => new Promise((res, rej) => {
+    const acc = [];
+    const pump = () => reader.readEntries((batch) => { if (!batch.length) res(acc); else { acc.push(...batch); pump(); } }, rej);
+    pump();
+  });
+  const walk = async (entry, prefix) => {
+    if (entry.isFile) { const file = await new Promise((res, rej) => entry.file(res, rej)); out.push({ file, path: prefix + entry.name }); }
+    else if (entry.isDirectory) { for (const child of await readAll(entry.createReader())) await walk(child, `${prefix}${entry.name}/`); }
+  };
+  for (const e of entries) await walk(e, '');
+  return out;
+}

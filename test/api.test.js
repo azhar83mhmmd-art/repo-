@@ -91,6 +91,20 @@ const { createServer } = require('../dev-server');
   assert(paths.includes('src/main.js') && !paths.includes('src/app.js')); ok('rename moves file in one commit');
   r = await call('POST', '/api/github/rename-file', { body: { owner: 'tester', repo: 'demo', branch: 'main', from: 'src/main.js', to: 'src/main.js', sha: t.sha } }); assert.equal(r.status, 400); ok('rename to same name rejected');
 
+  // delete folder (one commit, every file under it)
+  const treeNow = () => mock.state.trees[mock.state.commits[mock.state.refs.main].tree.sha].map((e) => e.path);
+  const underMany = treeNow().filter((x) => x.startsWith('many/')).length; assert(underMany > 0);
+  const c2 = mock.state.requests.filter((x) => x === 'POST /repos/tester/demo/git/commits').length;
+  r = await call('POST', '/api/github/delete-folder', { body: { owner: 'tester', repo: 'demo', branch: 'main', path: 'many' } });
+  assert.equal(r.status, 200, JSON.stringify(r.json)); assert.equal(r.json.deleted, underMany);
+  assert(!treeNow().some((x) => x.startsWith('many/')));
+  assert.equal(mock.state.requests.filter((x) => x === 'POST /repos/tester/demo/git/commits').length - c2, 1); ok('delete folder removes all files in one commit');
+  r = await call('POST', '/api/github/delete-folder', { body: { owner: 'tester', repo: 'demo', branch: 'main', path: 'many' } }); assert.equal(r.status, 404); ok('delete missing folder → 404');
+  r = await call('POST', '/api/github/delete-folder', { body: { owner: 'tester', repo: 'demo', branch: 'main', path: '../x' } }); assert.equal(r.status, 400); ok('delete folder rejects unsafe path');
+
+  r = await call('POST', '/api/github/delete-folder', { body: { owner: 'tester', repo: 'demo', branch: 'main', path: 'src/main.js' } });
+  assert.equal(r.status, 200, JSON.stringify(r.json)); assert.equal(r.json.file, true); assert(!treeNow().includes('src/main.js')); ok('delete single file via git data (one commit)');
+
   // token never leaks into any error output
   r = await call('POST', '/api/github/update-reference', { body: { owner: 'tester', repo: 'demo', branch: 'bad..name', sha: head } });
   assert.equal(r.status, 400); assert(!JSON.stringify(r.json).includes(mock.TOKEN)); ok('invalid branch rejected, no token in response');
