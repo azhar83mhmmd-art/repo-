@@ -1,0 +1,16 @@
+{
+  "name": "repofast",
+  "version": "1.0.0",
+  "description": "RepoFast — GitHub repository manager. Upload a ZIP once, push the whole project to GitHub in a single commit.",
+  "private": true,
+  "type": "commonjs",
+  "engines": { "node": ">=18" },
+  "scripts": {
+    "dev": "node dev-server.js",
+    "dev:vercel": "vercel dev",
+    "build": "node scripts/build.js",
+    "check": "node scripts/check.js",
+    "test": "node test/api.test.js"
+  },
+  "license": "MIT"
+}
