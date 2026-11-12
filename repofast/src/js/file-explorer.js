@@ -300,12 +300,14 @@ export async function render(host, ctx) {
   }
 
   async function remove(e) {
-    if (!(await confirmDialog({ title: `Delete ${e.name}?`, message: 'This creates a commit that removes the file. You can restore it from the commit history.', confirmText: 'Delete file', danger: true }))) return;
+    if (!(await confirmDialog({ title: `Delete ${e.name}?`, message: 'This creates a commit that removes the file. You can restore it from the commit history.', confirmText: 'Delete file', danger: true, details: html`<span class="mono">${e.path}</span>` }))) return;
+    const m = modal({ title: 'Deleting file', body: html`<div class="del-progress"><span class="spin-wrap">${ic('loader-2', 'lg spin')}</span><div><b>${e.path}</b><p class="cell-sub">Creating a commit…</p></div></div>`, dismissable: false });
     try {
-      const res = await api.deleteFile({ owner: S.repo.owner, repo: S.repo.name, path: e.path, sha: e.sha, branch: S.branch });
+      const res = await api.deletePath({ owner: S.repo.owner, repo: S.repo.name, path: e.path, branch: S.branch });
+      m.close();
       notify.success('File deleted', e.path, { href: res.commit.htmlUrl, linkText: 'View commit' });
-      S.cache.clear(); await open(S.path, true);
-    } catch (er) { notify.error('Delete failed', explain(er)); }
+      S.cache.clear(); S.dates.clear(); await open(S.path, true);
+    } catch (er) { m.close(); notify.error('Delete failed', explain(er)); }
   }
 
   async function removeFolder(e) {
@@ -313,7 +315,7 @@ export async function render(host, ctx) {
     if (!ok) return;
     const m = modal({ title: 'Deleting folder', body: html`<div class="del-progress"><span class="spin-wrap">${ic('loader-2', 'lg spin')}</span><div><b>${e.path}/</b><p class="cell-sub">Creating one commit that removes every file…</p></div></div>`, dismissable: false });
     try {
-      const res = await api.deleteFolder({ owner: S.repo.owner, repo: S.repo.name, branch: S.branch, path: e.path });
+      const res = await api.deletePath({ owner: S.repo.owner, repo: S.repo.name, branch: S.branch, path: e.path });
       m.close();
       notify.success('Folder deleted', `${res.deleted} file(s) removed from ${e.path}`, { href: res.commit.htmlUrl, linkText: 'View commit' });
       S.cache.clear(); S.dates.clear(); S.expanded.delete(e.path);

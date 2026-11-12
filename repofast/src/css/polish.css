@@ -159,3 +159,20 @@ body::before {
   .set-row { gap: 10px; }
   .kv > div { padding: 12px 0; }
 }
+
+/* ======================================================================
+   Responsive safety: nothing may be wider than the screen
+   ====================================================================== */
+html, body { max-width: 100%; overflow-x: clip; }
+.app, .main, .content, .card, .explorer, .ex-main, .ex-bar, .upload-grid > *, .two-col > *, .connect-grid > *, .repo-grid > *, .stats > * { min-width: 0; }
+.explorer { grid-template-columns: 250px minmax(0, 1fr); }
+.ex-actions { min-width: 0; max-width: 100%; }
+.path-crumbs { min-width: 0; max-width: 100%; overflow-x: auto; flex-wrap: nowrap; scrollbar-width: none; }
+.path-crumbs button { white-space: nowrap; }
+.table-wrap { max-width: 100%; }
+@media (max-width: 1024px) { .explorer { grid-template-columns: minmax(0, 1fr); } }
+@media (max-width: 760px) {
+  .ex-actions { margin: 0; padding: 2px 0 4px; }
+  .modal-root { z-index: 120; }
+  .menu { max-width: calc(100vw - 16px); z-index: 160; }
+}

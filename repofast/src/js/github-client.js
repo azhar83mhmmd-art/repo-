@@ -97,6 +97,7 @@ export const api = {
   deleteFile: (body) => post('github/delete-file', body),
   renameFile: (body) => post('github/rename-file', body),
   deleteFolder: (body) => post('github/delete-folder', body),
+  deletePath: (body) => post('github/delete-folder', body), // file or folder, one commit
 
   createTree: (body) => post('github/create-tree', body),
   createCommit: (body) => post('github/create-commit', body),

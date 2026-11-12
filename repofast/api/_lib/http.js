@@ -19,7 +19,7 @@ function clientIp(req) {
 }
 
 function rateLimit(req) {
-  const limit = Number(process.env.RATE_LIMIT_PER_MIN) || 240;
+  const limit = Number(process.env.RATE_LIMIT_PER_MIN) || 1500;
   const now = Date.now();
   const ip = clientIp(req);
   let b = buckets.get(ip);

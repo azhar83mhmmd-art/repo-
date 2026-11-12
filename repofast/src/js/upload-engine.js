@@ -17,9 +17,9 @@ async function retry(fn, signal, tries = 3) {
     catch (e) {
       if (e && e.name === 'AbortError') throw new UploadCancelled();
       last = e;
-      const transient = e instanceof ApiError && [0, 502, 503, 504].includes(e.status);
+      const transient = e instanceof ApiError && ([0, 502, 503, 504].includes(e.status) || e.code === 'app_rate_limited');
       if (!transient || i === tries) throw e;
-      await new Promise((r) => setTimeout(r, 600 * 2 ** (i - 1)));
+      await new Promise((r) => setTimeout(r, (e.code === 'app_rate_limited' ? 4000 : 600) * 2 ** (i - 1)));
     }
   }
   throw last;

@@ -102,6 +102,9 @@ const { createServer } = require('../dev-server');
   r = await call('POST', '/api/github/delete-folder', { body: { owner: 'tester', repo: 'demo', branch: 'main', path: 'many' } }); assert.equal(r.status, 404); ok('delete missing folder → 404');
   r = await call('POST', '/api/github/delete-folder', { body: { owner: 'tester', repo: 'demo', branch: 'main', path: '../x' } }); assert.equal(r.status, 400); ok('delete folder rejects unsafe path');
 
+  r = await call('POST', '/api/github/delete-folder', { body: { owner: 'tester', repo: 'demo', branch: 'main', path: 'src/main.js' } });
+  assert.equal(r.status, 200, JSON.stringify(r.json)); assert.equal(r.json.file, true); assert(!treeNow().includes('src/main.js')); ok('delete single file via git data (one commit)');
+
   // token never leaks into any error output
   r = await call('POST', '/api/github/update-reference', { body: { owner: 'tester', repo: 'demo', branch: 'bad..name', sha: head } });
   assert.equal(r.status, 400); assert(!JSON.stringify(r.json).includes(mock.TOKEN)); ok('invalid branch rejected, no token in response');
