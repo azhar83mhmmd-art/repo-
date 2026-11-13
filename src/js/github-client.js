@@ -40,7 +40,7 @@ async function parseError(res) {
   let payload = null;
   try { payload = await res.json(); } catch { /* not JSON */ }
   const e = payload && payload.error;
-  if (!e && res.status === 404) return new ApiError(404, 'Server API RepoFast tidak ditemukan (404 dari hosting, bukan dari GitHub). Folder api/ belum ter-deploy di Vercel — deploy ulang proyek lengkap (termasuk api/[...route].js).', { code: 'api_missing' });
+  if (!e && res.status === 404) return new ApiError(404, 'Server API RepoFast tidak ditemukan (404 dari hosting, bukan dari GitHub). Folder api/ belum ter-deploy di Vercel — deploy ulang proyek lengkap (termasuk api/index.js dan vercel.json).', { code: 'api_missing' });
   return new ApiError(res.status, (e && e.message) || FRIENDLY[res.status] || 'Something went wrong.', {
     code: e && e.code, detail: e && e.detail, rateLimit: e && e.rateLimit,
   });
