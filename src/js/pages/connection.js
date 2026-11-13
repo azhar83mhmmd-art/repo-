@@ -6,9 +6,10 @@ import { notify } from '../notification.js';
 import { confirmDialog } from '../ui/overlay.js';
 import { prefs } from '../store.js';
 import { state } from '../app-state.js';
+import { mountTokenTutorial } from '../ui/token-tutorial.js';
 
 const PAT_NEW = 'https://github.com/settings/personal-access-tokens/new';
-const PAT_CLASSIC = 'https://github.com/settings/tokens/new?scopes=repo&description=RepoFast';
+const PAT_CLASSIC = 'https://github.com/settings/tokens/new?scopes=repo,delete_repo&description=RepoFast';
 const DEV_SETTINGS = 'https://github.com/settings/developers';
 
 export async function render(host, ctx) {
@@ -21,6 +22,7 @@ export async function render(host, ctx) {
     return html`
       <div class="page-head"><div><h1>GitHub Connection</h1><p>Connect with a Personal Access Token. It stays on this device — RepoFast has no accounts and no database.</p></div></div>
       ${redirected ? html`<div class="alert" style="margin-bottom:18px">${ic('info')}<div>Connect your GitHub account to continue.</div></div>` : ''}
+      <div id="tutorialSlot"></div>
       <div class="connect-grid">
         <section class="card connect-card">
           <div class="connect-hero">
@@ -110,6 +112,8 @@ export async function render(host, ctx) {
   }
 
   function bind() {
+    const slot = $('#tutorialSlot', host);
+    if (slot) mountTokenTutorial(slot);
     const input = $('#tokenInput', host);
     const err = $('#tokenError', host);
     const showErr = (m) => { if (!err) return; err.hidden = !m; err.textContent = m || ''; input && input.classList.toggle('invalid', !!m); };

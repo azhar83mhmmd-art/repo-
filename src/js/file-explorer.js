@@ -303,7 +303,12 @@ export async function render(host, ctx) {
     if (!(await confirmDialog({ title: `Delete ${e.name}?`, message: 'This creates a commit that removes the file. You can restore it from the commit history.', confirmText: 'Delete file', danger: true, details: html`<span class="mono">${e.path}</span>` }))) return;
     const m = modal({ title: 'Deleting file', body: html`<div class="del-progress"><span class="spin-wrap">${ic('loader-2', 'lg spin')}</span><div><b>${e.path}</b><p class="cell-sub">Creating a commit…</p></div></div>`, dismissable: false });
     try {
-      const res = await api.deletePath({ owner: S.repo.owner, repo: S.repo.name, path: e.path, branch: S.branch });
+      let res;
+      try { res = await api.deletePath({ owner: S.repo.owner, repo: S.repo.name, path: e.path, branch: S.branch }); }
+      catch (first) {
+        if (!e.sha || [401, 403].includes(first.status)) throw first;
+        res = await api.deleteFile({ owner: S.repo.owner, repo: S.repo.name, path: e.path, branch: S.branch, sha: e.sha });
+      }
       m.close();
       notify.success('File deleted', e.path, { href: res.commit.htmlUrl, linkText: 'View commit' });
       S.cache.clear(); S.dates.clear(); await open(S.path, true);

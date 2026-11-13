@@ -1,7 +1,7 @@
 // Repositories page + Create Repository dialog.
 import { html, mount, ic, $, $$, timeAgo, debounce, copyText, safeUrl } from './ui/dom.js';
 import { Select } from './ui/select.js';
-import { modal } from './ui/overlay.js';
+import { modal, typeConfirm } from './ui/overlay.js';
 import { api, explain } from './github-client.js';
 import { loadRepos, invalidateRepos } from './repos.js';
 import { notify } from './notification.js';
@@ -30,12 +30,21 @@ export function repoCard(r) {
       <div class="repo-actions">
         <button class="btn sm primary" data-manage="${r.fullName}">${ic('files', 'sm')}Manage</button>
         <button class="btn sm" data-upload="${r.fullName}">${ic('cloud-upload', 'sm')}Upload</button>
+        <button class="btn sm ghost icon-only danger-text" data-delrepo="${r.fullName}" aria-label="Hapus ${r.fullName}" title="Hapus repository">${ic('trash-2', 'sm')}</button>
         <a class="btn sm ghost icon-only" href="${safeUrl(r.htmlUrl)}" target="_blank" rel="noopener noreferrer" aria-label="Open ${r.fullName} on GitHub" title="Open on GitHub">${ic('arrow-up-right', 'sm')}</a>
       </div>
     </article>`;
 }
 
-export function bindRepoCards(root) {
+export function bindRepoCards(root, onDeleted) {
+  $$('[data-delrepo]', root).forEach((b) => b.addEventListener('click', async () => {
+    const full = b.dataset.delrepo; const [owner, name] = full.split('/');
+    if (!(await typeConfirm({ title: `Hapus repository ${name}?`, message: 'Repository beserta semua file, issue, dan riwayat commit-nya akan dihapus PERMANEN dari GitHub. Tindakan ini tidak bisa dibatalkan.', expected: name, confirmText: 'Hapus repository' }))) return;
+    b.classList.add('loading');
+    try { await api.deleteRepository({ owner, repo: name, confirm: name }); invalidateRepos(); notify.success('Repository dihapus', full); onDeleted && onDeleted(); }
+    catch (er) { notify.error('Gagal menghapus repository', explain(er)); }
+    finally { b.classList.remove('loading'); }
+  }));
   $$('[data-manage]', root).forEach((b) => b.addEventListener('click', () => { state.selection.repo = b.dataset.manage; navigate('explorer', { repo: b.dataset.manage }); }));
   $$('[data-upload]', root).forEach((b) => b.addEventListener('click', () => { state.selection.repo = b.dataset.upload; navigate('upload', { repo: b.dataset.upload }); }));
 }
@@ -86,7 +95,7 @@ export async function render(host) {
       pager.innerHTML = ''; return;
     }
     mount(list, html`<div class="repo-grid">${slice.map(repoCard)}</div>`);
-    bindRepoCards(list);
+    bindRepoCards(list, () => load(true));
     mount(pager, pages > 1 ? html`
       <span class="cell-sub">${rows.length} repositories · page ${view.page} of ${pages}</span>
       <div class="pager-btns"><button class="btn sm" data-p="-1" ${view.page === 1 ? 'disabled' : ''}>${ic('chevron-left', 'sm')}Previous</button><button class="btn sm" data-p="1" ${view.page === pages ? 'disabled' : ''}>Next${ic('chevron-right', 'sm')}</button></div>`

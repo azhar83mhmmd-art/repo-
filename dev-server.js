@@ -12,7 +12,7 @@ const PORT = Number(process.env.PORT) || 3000;
 const MIME = {
   '.html': 'text/html; charset=utf-8', '.css': 'text/css; charset=utf-8', '.js': 'text/javascript; charset=utf-8',
   '.mjs': 'text/javascript; charset=utf-8', '.json': 'application/json', '.svg': 'image/svg+xml',
-  '.png': 'image/png', '.ico': 'image/x-icon', '.txt': 'text/plain; charset=utf-8',
+  '.png': 'image/png', '.jpg': 'image/jpeg', '.mp4': 'video/mp4', '.ico': 'image/x-icon', '.txt': 'text/plain; charset=utf-8',
 };
 
 function staticFile(urlPath) {
@@ -59,7 +59,18 @@ function createServer() {
 
     const f = staticFile(url.pathname);
     if (!f) { res.writeHead(404); return res.end('Not found'); }
-    res.writeHead(200, { 'Content-Type': MIME[path.extname(f)] || 'application/octet-stream', 'Cache-Control': 'no-cache' });
+    const type = MIME[path.extname(f)] || 'application/octet-stream';
+    const size = fs.statSync(f).size;
+    const m = /^bytes=(\d*)-(\d*)$/.exec(req.headers.range || '');
+    if (m && (m[1] || m[2])) {   // Range support so <video> can seek
+      const start = m[1] ? Number(m[1]) : Math.max(0, size - Number(m[2]));
+      const end = m[1] && m[2] ? Math.min(Number(m[2]), size - 1) : size - 1;
+      if (start > end || start >= size) { res.writeHead(416, { 'Content-Range': `bytes */${size}` }); return res.end(); }
+      res.writeHead(206, { 'Content-Type': type, 'Accept-Ranges': 'bytes', 'Content-Range': `bytes ${start}-${end}/${size}`, 'Content-Length': end - start + 1 });
+      return fs.createReadStream(f, { start, end }).pipe(res);
+    }
+    res.writeHead(200, { 'Content-Type': type, 'Content-Length': size, 'Accept-Ranges': 'bytes', 'Cache-Control': 'no-cache' });
+    if (req.method === 'HEAD') return res.end();
     fs.createReadStream(f).pipe(res);
   });
 }

@@ -37,6 +37,17 @@ const { createServer } = require('../dev-server');
   r = await call('GET', '/api/auth/connect'); assert.equal(r.status, 405); ok('wrong method → 405');
   r = await call('GET', '/api/_lib/http'); assert.equal(r.status, 404); ok('_lib is not routable');
 
+  // Vercel merges the catch-all file-name param into req.query; real ?path= must still win
+  {
+    const { dispatch } = require('../api/_lib/router');
+    const seen = {};
+    const orig = require('../api/_lib/router').routes['github/repository-tree'];
+    require('../api/_lib/router').routes['github/repository-tree'] = (req) => { Object.assign(seen, req.query); return { end() {} }; };
+    dispatch({ url: '/api/github/repository-tree?owner=o&repo=r&path=src/js', query: { route: ['github', 'repository-tree'], path: 'github/repository-tree' } }, {});
+    require('../api/_lib/router').routes['github/repository-tree'] = orig;
+    assert.equal(seen.path, 'src/js'); assert.equal(seen.owner, 'o'); ok('?path= is not overwritten by the catch-all param');
+  }
+
   // repos
   r = await call('GET', '/api/github/repositories'); assert.equal(r.json.repositories[0].fullName, 'tester/demo'); ok('list repositories');
   r = await call('POST', '/api/github/create-repository', { body: { name: 'new-one', visibility: 'public' } });

@@ -95,3 +95,22 @@ export function popMenu(anchor, items, { header, align = 'right' } = {}) {
   btns[0] && btns[0].focus({ preventScroll: true });
   return { close };
 }
+
+/** Danger dialog: the user must type `expected` before the confirm button unlocks. */
+export function typeConfirm({ title, message, expected, confirmText = 'Delete' }) {
+  return new Promise((resolve) => {
+    let settled = false;
+    const done = (v) => { if (!settled) { settled = true; resolve(v); } };
+    const m = modal({
+      title,
+      body: html`<p style="color:var(--text-2)">${message}</p><div class="alert warning">${ic('alert-triangle')}<div>Ketik <b class="mono">${expected}</b> untuk melanjutkan.</div></div><input class="input mono" id="tcInput" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="${expected}" style="margin-top:12px">`,
+      footer: html`<button class="btn" data-no>Batal</button><button class="btn danger" data-yes disabled>${confirmText}</button>`,
+      onClose: () => done(false),
+    });
+    const inp = m.el.querySelector('#tcInput'), yes = m.el.querySelector('[data-yes]');
+    inp.addEventListener('input', () => { yes.disabled = inp.value.trim() !== expected; });
+    m.el.querySelector('[data-no]').addEventListener('click', () => m.close());
+    yes.addEventListener('click', () => { if (inp.value.trim() === expected) { done(true); m.close(); } });
+    setTimeout(() => inp.focus(), 50);
+  });
+}

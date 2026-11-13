@@ -5,6 +5,7 @@
 // and are dispatched from here. Routes are listed explicitly so the bundler traces each one.
 
 const routes = {
+  'health': require('./routes/health'),
   'auth/verify': require('./routes/auth/verify'),
   'auth/connect': require('./routes/auth/connect'),
   'auth/disconnect': require('./routes/auth/disconnect'),
@@ -24,6 +25,7 @@ const routes = {
   'github/repository-tree': require('./routes/github/repository-tree'),
   'github/branches': require('./routes/github/branches'),
   'github/delete-file': require('./routes/github/delete-file'),
+  'github/delete-repository': require('./routes/github/delete-repository'),
   'github/commits': require('./routes/github/commits'),
   'github/create-commit': require('./routes/github/create-commit'),
 };
@@ -31,7 +33,12 @@ const routes = {
 function dispatch(req, res) {
   let pathname = '';
   try {
-    pathname = new URL(req.url, 'http://localhost').pathname;
+    const url = new URL(req.url, 'http://localhost');
+    pathname = url.pathname;
+    // The query string of the ORIGINAL url is the source of truth. Vercel merges dynamic-route
+    // params (the catch-all file name) into req.query, which would overwrite real params such as
+    // ?path=... that the file/folder endpoints rely on.
+    req.query = Object.fromEntries(url.searchParams);
   } catch {
     /* fall through to 404 */
   }

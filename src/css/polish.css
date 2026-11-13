@@ -176,3 +176,4 @@ html, body { max-width: 100%; overflow-x: clip; }
   .modal-root { z-index: 120; }
   .menu { max-width: calc(100vw - 16px); z-index: 160; }
 }
+.danger-text { color: var(--danger); } .danger-text:hover { background: rgba(239,68,68,.12); }
