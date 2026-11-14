@@ -48,6 +48,16 @@ const { createServer } = require('../dev-server');
     assert.equal(seen.path, 'src/js'); assert.equal(seen.owner, 'o'); ok('?path= is not overwritten by the catch-all param');
   }
 
+  // Vercel may append rewrite params to the url itself (duplicate ?path=); the browser's value must win
+  {
+    const { dispatch, routes } = require('../api/_lib/router');
+    const seen = {}; const orig = routes['github/repository-tree'];
+    routes['github/repository-tree'] = (req) => { Object.assign(seen, req.query); return { end() {} }; };
+    dispatch({ url: '/api/github/repository-tree?owner=o&repo=r&path=src&path=github%2Frepository-tree&__rf_route=github%2Frepository-tree' }, {});
+    routes['github/repository-tree'] = orig;
+    assert.equal(seen.path, 'src'); assert.equal(seen.__rf_route, undefined); ok('duplicate/injected ?path= cannot override the real one');
+  }
+
   // repos
   r = await call('GET', '/api/github/repositories'); assert.equal(r.json.repositories[0].fullName, 'tester/demo'); ok('list repositories');
   r = await call('POST', '/api/github/create-repository', { body: { name: 'new-one', visibility: 'public' } });
