@@ -48,7 +48,7 @@ Batasan yang perlu diketahui:
 
 ```
 api/_lib/      http pipeline, GitHub client, validasi, commit flow
-api/index.js         satu-satunya serverless function (vercel.json me-rewrite /api/* ke sini) (batas Hobby: 12); api/_lib/router.js mendispatch ke api/_lib/routes/*
+api/[...path].js     satu-satunya serverless function (catch-all, tanpa rewrite) (batas Hobby: 12); api/_lib/router.js mendispatch ke api/_lib/routes/*
 src/js/        app, router, github-client, upload-engine/manager, zip-manager, file-explorer, ...
 src/css/       variables, layout, components, dashboard, responsive
 public/        logo, favicon, vendor (jszip, highlight.js — di-bundel lokal)
