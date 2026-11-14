@@ -7,21 +7,55 @@ import { confirmDialog } from '../ui/overlay.js';
 import { prefs } from '../store.js';
 import { state } from '../app-state.js';
 import { mountTokenTutorial } from '../ui/token-tutorial.js';
+import { expirySnapshot, longDate, refreshExpiryNow } from '../token-expiry.js';
 
 const PAT_NEW = 'https://github.com/settings/personal-access-tokens/new';
 const PAT_CLASSIC = 'https://github.com/settings/tokens/new?scopes=repo,delete_repo&description=RepoFast';
 const DEV_SETTINGS = 'https://github.com/settings/developers';
+const TOKENS_FINE = 'https://github.com/settings/personal-access-tokens';
+const TOKENS_CLASSIC = 'https://github.com/settings/tokens';
 
 export async function render(host, ctx) {
   const draw = () => {
     mount(host, state.connected ? connectedView() : formView(ctx.redirected));
     bind();
+    refreshExpiryNow();
   };
+
+  function endedNotice() {
+    const n = state.sessionEnded;
+    if (!n) return '';
+    if (n.reason === 'expired') {
+      return html`<div class="alert danger" style="margin-bottom:18px">${ic('alert-circle')}<div>
+        <b>Your GitHub token expired</b>${n.expiresAt ? html` on <b>${longDate(n.expiresAt)}</b>` : ''}${n.login ? html` (account <span class="mono">@${n.login}</span>)` : ''}. RepoFast stopped using it and erased it from this device.
+        <ol class="steps" style="margin-top:8px">
+          <li>Open <a href="${TOKENS_FINE}" target="_blank" rel="noopener noreferrer">your tokens on GitHub</a> (classic tokens: <a href="${TOKENS_CLASSIC}" target="_blank" rel="noopener noreferrer">here</a>), choose the expired one and press <b>Regenerate token</b> — or create a new one with a later expiry date.</li>
+          <li>Paste the new token below and press <b>Connect GitHub</b>. Your repositories and settings are still here.</li>
+        </ol></div></div>`;
+    }
+    return html`<div class="alert warning" style="margin-bottom:18px">${ic('alert-triangle')}<div><b>GitHub rejected your token</b> — it was revoked, deleted or has expired. It was erased from this device. Create a new token and connect again.</div></div>`;
+  }
+
+  function expiryCard() {
+    const snap = expirySnapshot();
+    if (!snap.has) {
+      return html`<section class="card pad info-card"><h3>${ic('clock')}Token expiry</h3><p style="margin:0;color:var(--text-2);font-size:13px">GitHub did not report an expiry date for this token (a classic token created with “No expiration”). RepoFast keeps using it until you disconnect or GitHub rejects it.</p></section>`;
+    }
+    return html`<section class="card pad info-card expiry-card"><h3>${ic('clock')}Token expiry</h3>
+      <div class="exp-big mono" data-expiry-level data-level="${snap.level}"><span data-expiry-countdown>${snap.text}</span></div>
+      <div class="exp-date">Expires ${longDate(snap.iso)}</div>
+      <ul class="exp-logic">
+        <li>You get a warning 7 days, 3 days, 24 hours, 1 hour and 10 minutes before.</li>
+        <li>At the exact expiry time RepoFast stops sending the token, erases it from this device and brings you back here.</li>
+        <li>Then regenerate it (or create a new one) on GitHub and connect again.</li>
+      </ul></section>`;
+  }
 
   function formView(redirected) {
     return html`
       <div class="page-head"><div><h1>GitHub Connection</h1><p>Connect with a Personal Access Token. It stays on this device — RepoFast has no accounts and no database.</p></div></div>
-      ${redirected ? html`<div class="alert" style="margin-bottom:18px">${ic('info')}<div>Connect your GitHub account to continue.</div></div>` : ''}
+      ${endedNotice()}
+      ${redirected && !state.sessionEnded ? html`<div class="alert" style="margin-bottom:18px">${ic('info')}<div>Connect your GitHub account to continue.</div></div>` : ''}
       <div id="tutorialSlot"></div>
       <div class="connect-grid">
         <section class="card connect-card">
@@ -97,11 +131,13 @@ export async function render(host, ctx) {
             <div><dt>Token type</dt><dd>${t.type === 'classic' ? 'Classic PAT' : 'Fine-grained PAT'}</dd></div>
             <div><dt>Public repositories</dt><dd>${u.publicRepos ?? '—'}</dd></div>
             <div><dt>Plan</dt><dd>${u.plan || '—'}</dd></div>
+            <div><dt>Token expires</dt><dd>${t.expiresAt ? longDate(t.expiresAt) : 'No expiry reported'}</dd></div>
             ${state.rateLimit ? html`<div><dt>API rate limit</dt><dd>${state.rateLimit.remaining} / ${state.rateLimit.limit} left</dd></div>` : ''}
             ${t.scopes.length ? html`<div><dt>Scopes</dt><dd class="scopes">${t.scopes.map((s) => html`<span class="badge primary mono">${s}</span>`)}</dd></div>` : ''}
           </dl>
         </section>
         <aside class="side-stack">
+          ${expiryCard()}
           <section class="card pad info-card">
             <h3>${ic('shield-check')}Token permission validation</h3>
             <ul class="perm-list">${perms.map((p) => html`<li class="${p.ok === true ? 'ok' : p.ok === false ? 'bad' : 'unk'}">${ic(p.ok === true ? 'check-circle-2' : p.ok === false ? 'alert-circle' : 'info')}<div><b>${p.label}</b><small>${p.hint}</small></div></li>`)}</ul>

@@ -6,7 +6,8 @@ import { html, create, ic, mount, esc, avatarImg } from './ui/dom.js';
 import { modal, popMenu } from './ui/overlay.js';
 import { notify } from './notification.js';
 import { prefs } from './store.js';
-import { restore, disconnect } from './session.js';
+import { restore, disconnect, resolveAuthLost } from './session.js';
+import { startExpiryWatch, refreshExpiryNow, longDate } from './token-expiry.js';
 import { explain } from './github-client.js';
 import { loadRepos } from './repos.js';
 
@@ -47,8 +48,11 @@ function renderSidebar() {
   const card = $('#connCard');
   const dc = $('#disconnectBtn');
   if (state.connected && state.user) {
+    const exp = state.token && state.token.expiresAt
+      ? `<span class="conn-exp" data-expiry-level title="Token expires ${esc(longDate(state.token.expiresAt))}">${icon('clock', 'sm')}<span class="mono" data-expiry-countdown></span></span>` : '';
     card.innerHTML = `${avatarImg(state.user, 64, 'avatar', 32)}
-      <div class="conn-meta"><b>${esc(state.user.login)}</b><span class="conn-state"><i class="dot ok"></i>Connected</span></div>`;
+      <div class="conn-meta"><b>${esc(state.user.login)}</b><span class="conn-state"><i class="dot ok"></i>Connected</span>${exp}</div>`;
+    refreshExpiryNow();
     dc.hidden = false;
   } else {
     card.innerHTML = `<span class="avatar" style="display:grid;place-items:center;color:var(--text-3)">${icon('github', 'sm')}</span>
@@ -209,12 +213,16 @@ async function boot() {
   onState(renderSidebar);
   renderSidebar();
 
+  // The token stopped working (401 from GitHub, or its expiry date passed). resolveAuthLost() decides,
+  // erases the token from this device when it is really dead, and tells us why.
   window.addEventListener('repofast:auth-lost', async () => {
-    if (!state.connected) return;
-    await disconnect();
-    notify.error('Session ended', 'Your GitHub token is invalid or expired. Please connect again.');
+    const notice = await resolveAuthLost();
+    if (!notice) return;
+    if (notice.reason === 'expired') notify.error('GitHub token expired', `It expired on ${longDate(notice.expiresAt)} and was removed from this device. Create or regenerate a token, then reconnect.`, { duration: 15000 });
+    else notify.error('Session ended', 'GitHub rejected your token — it was revoked, deleted or has expired. Please connect again.', { duration: 12000 });
     navigate('connection');
   });
+  startExpiryWatch();
 
   defineRoutes(PAGES);
   onRoute(renderPage);

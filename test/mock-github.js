@@ -7,7 +7,7 @@ function sha(s) { return crypto.createHash('sha1').update(String(s) + Math.rando
 
 function createMock() {
   const TOKEN = 'ghp_' + 'a'.repeat(36);
-  const state = { blobs: {}, trees: {}, commits: {}, refs: {}, requests: [] };
+  const state = { blobs: {}, trees: {}, commits: {}, refs: {}, requests: [], expiry: null, dieAt: null };
   const repo = { id: 1, name: 'demo', full_name: 'tester/demo', owner: { login: 'tester' }, private: true, visibility: 'private', default_branch: 'main', html_url: 'https://github.com/tester/demo', updated_at: '2026-01-01T00:00:00Z' };
 
   // seed: one commit with README.md
@@ -28,9 +28,9 @@ function createMock() {
       state.requests.push(`${req.method} ${p}`);
       const out = (code, obj, headers = {}) => { res.writeHead(code, { 'Content-Type': 'application/json', ...headers }); res.end(JSON.stringify(obj)); };
 
-      if (req.headers.authorization !== `Bearer ${TOKEN}`) return out(401, { message: 'Bad credentials' });
+      if (req.headers.authorization !== `Bearer ${TOKEN}` || (state.dieAt && Date.now() >= state.dieAt)) return out(401, { message: 'Bad credentials' });
       let m;
-      if (p === '/user') return out(200, { login: 'tester', name: 'Test', avatar_url: 'x', html_url: 'u', type: 'User', id: 1, public_repos: 0 }, { 'x-oauth-scopes': 'repo', 'x-ratelimit-limit': '5000', 'x-ratelimit-remaining': '4999', 'x-ratelimit-reset': '1' });
+      if (p === '/user') return out(200, { login: 'tester', name: 'Test', avatar_url: 'x', html_url: 'u', type: 'User', id: 1, public_repos: 0 }, { ...(state.expiry ? { 'github-authentication-token-expiration': state.expiry } : {}), 'x-oauth-scopes': 'repo', 'x-ratelimit-limit': '5000', 'x-ratelimit-remaining': '4999', 'x-ratelimit-reset': '1' });
       if (p === '/user/repos' && req.method === 'GET') return out(200, [repo]);
       if (p === '/user/repos' && req.method === 'POST') return out(201, { ...repo, name: body.name, full_name: 'tester/' + body.name, private: body.private });
       if ((m = p.match(/^\/repos\/tester\/demo$/))) return out(200, repo);

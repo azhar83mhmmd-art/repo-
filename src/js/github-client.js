@@ -26,8 +26,33 @@ const FRIENDLY = {
 let token = null;
 export const setToken = (t) => { token = t; };
 export const hasToken = () => !!token;
+
+/* ---- token expiry + trusted clock ----
+   The expiry date comes from GitHub itself. "Now" is corrected with the Date header of every server
+   response, so a wrong phone clock can neither hide an expiry nor invent one. */
+let expiresAtMs = null;
+let holdUntil = 0;
+let clockOffset = 0;
+export const serverNow = () => Date.now() + clockOffset;
+export const setTokenExpiry = (iso) => { const t = iso ? Date.parse(iso) : NaN; expiresAtMs = Number.isFinite(t) ? t : null; holdUntil = 0; };
+/** Suspends the "expired" verdict for a moment (used while GitHub still accepts a token our clock thinks is dead). */
+export const holdExpiry = (ms) => { holdUntil = Date.now() + ms; };
+export const isTokenExpired = () => expiresAtMs !== null && Date.now() >= holdUntil && serverNow() >= expiresAtMs;
+function noteServerClock(res) {
+  const t = Date.parse(res.headers.get('date') || '');
+  if (Number.isFinite(t)) clockOffset = t - Date.now();
+}
+function expiredError() {
+  window.dispatchEvent(new CustomEvent('repofast:auth-lost', { detail: { reason: 'expired' } }));
+  return new ApiError(401, 'Your GitHub token has expired.', { code: 'token_expired' });
+}
+
 /** Runs fn with a temporary token (used to test a token without connecting). */
-export async function withToken(t, fn) { const prev = token; token = t; try { return await fn(); } finally { token = prev; } }
+export async function withToken(t, fn) {
+  const prev = token; const prevExp = expiresAtMs; const prevHold = holdUntil;
+  token = t; expiresAtMs = null;
+  try { return await fn(); } finally { token = prev; expiresAtMs = prevExp; holdUntil = prevHold; }
+}
 
 // Largest base64 payload that safely fits through the serverless function (Vercel limit ≈ 4.5 MB).
 export const PROXY_MAX_B64 = 3.2 * 1024 * 1024;
@@ -50,6 +75,8 @@ async function request(method, path, { query, body, signal, retries } = {}) {
   const url = new URL(`/api/${path}`, location.origin);
   if (query) for (const [k, v] of Object.entries(query)) if (v !== undefined && v !== null && v !== '') url.searchParams.set(k, v);
   const attempts = retries ?? (method === 'GET' ? 3 : 1);
+  // A token whose expiry date has passed is never sent: fail fast, locally, with a clear reason.
+  if (token && !path.startsWith('auth/') && isTokenExpired()) throw expiredError();
 
   for (let i = 1; i <= attempts; i++) {
     let res;
@@ -71,10 +98,11 @@ async function request(method, path, { query, body, signal, retries } = {}) {
       if (i < attempts) { await sleep(400 * 2 ** (i - 1)); continue; }
       throw new ApiError(0, 'Cannot reach the RepoFast server. Check your connection and try again.', { code: 'network' });
     }
+    noteServerClock(res);
     if (res.ok) return res.status === 204 ? null : res.json();
     const err = await parseError(res);
     if ([502, 503, 504].includes(res.status) && i < attempts) { await sleep(500 * 2 ** (i - 1)); continue; }
-    if (res.status === 401 && err.code !== 'invalid_token_format') window.dispatchEvent(new CustomEvent('repofast:auth-lost'));
+    if (res.status === 401 && err.code !== 'invalid_token_format') window.dispatchEvent(new CustomEvent('repofast:auth-lost', { detail: { reason: 'rejected' } }));
     throw err;
   }
 }
@@ -117,6 +145,7 @@ export const api = {
    * same token. Nothing is stored; only the request path differs.
    */
   async blobDirect(owner, repo, base64, signal) {
+    if (token && isTokenExpired()) throw expiredError();
     let res;
     try {
       res = await fetch(`${GH_DIRECT}/repos/${owner}/${repo}/git/blobs`, {

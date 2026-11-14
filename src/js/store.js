@@ -2,6 +2,8 @@
 const PREFS_KEY = 'repofast.prefs.v1';
 const HISTORY_KEY = 'repofast.history.v1';
 const LAST_KEY = 'repofast.last.v1';
+const TOKEN_META_KEY = 'repofast.tokenmeta.v1';
+const EXPIRY_SEEN_KEY = 'repofast.expiry-seen.v1';
 
 export const DEFAULT_PREFS = Object.freeze({
   theme: 'dark',
@@ -41,4 +43,18 @@ export const history = {
 export const last = {
   get() { return read(LAST_KEY, {}); },
   set(patch) { write(LAST_KEY, { ...this.get(), ...patch }); },
+};
+
+/** Non-secret facts about the last connected token (login + expiry date) so we can explain what happened after a restart. */
+export const tokenMeta = {
+  get() { return read(TOKEN_META_KEY, {}); },
+  set(meta) { write(TOKEN_META_KEY, meta); },
+  clear() { try { localStorage.removeItem(TOKEN_META_KEY); } catch { /* ignore */ } },
+};
+
+/** Which expiry warnings (7d, 1d, …) were already shown for a given expiry date, so each is shown once. */
+export const expirySeen = {
+  get(expiresAt) { const v = read(EXPIRY_SEEN_KEY, null); return v && v.expiresAt === expiresAt && Array.isArray(v.ids) ? v.ids : []; },
+  add(expiresAt, ids) { write(EXPIRY_SEEN_KEY, { expiresAt, ids: [...new Set([...this.get(expiresAt), ...ids])] }); },
+  clear() { try { localStorage.removeItem(EXPIRY_SEEN_KEY); } catch { /* ignore */ } },
 };
